@@ -1,0 +1,107 @@
+#!/bin/bash
+#
+# ***************************************************************************
+# Name                 : 16bit 2 8bit
+# Description          : Convert 16 to 8 bits. Change original image!
+#
+# Arguments: 
+# $1: Image with 16bits
+#
+# Dependencies         : gdal 1.10.1 (gdal_translate, gdalinfo, gdalbuildvrt)
+#
+# ***************************************************************************
+# begin                : 2015-03-02 (yyyy-mm-dd)
+# copyright            : (C) 2015 by Luiz Motta
+# email                : motta dot luiz at gmail.com
+# ***************************************************************************
+#
+# Revisions
+#
+# 0000-00-00:
+# - None
+# 
+# ***************************************************************************
+#
+# Example:
+#   16b_2_8b_convert.sh LC8_229-066_20140724_LGN00_r6g5b4.tif
+#
+# ***************************************************************************
+# *                                                                         *
+# *   This program is free software; you can redistribute it and/or modify  *
+# *   it under the terms of the GNU General Public License as published by  *
+# *   the Free Software Foundation; either version 2 of the License, or     *
+# *   (at your option) any later version.                                   *
+# *                                                                         *
+# ***************************************************************************
+#
+calc_min_max(){
+# line_stats:
+# Minimum=5145.000,Maximum=21668.000,Mean=6399.841,StdDev=871.059
+  local line_stats=$1
+  local min=$(echo $line_stats | cut -d',' -f1 | cut -d'=' -f2)
+  local max=$(echo $line_stats | cut -d',' -f2 | cut -d'=' -f2)
+  min_max=$(echo "${min%.*} ${max%.*}")
+}
+#
+calc_min_max_bands(){
+  local img=$1
+  local numb=0
+  for item in $(gdalinfo -stats $img | grep Minimum | sed 's/\s\+//g')
+  do
+    numb=$(echo "$numb+1" | bc)
+    calc_min_max $item
+    min_max_bands[$numb]=$(echo $min_max)
+  done
+}
+#
+calc_str_vrt_bands(){
+  str_vrt_bands=""
+  for numBand in $( seq 1 ${#min_max_bands[@]} )
+  do
+    str_vrt_bands="$str_vrt_bands $temp_dir/$basename_img.B$numBand.temp"
+  done
+}
+#
+msg_error(){
+  local name_script=$(basename $0)
+  echo "Usage: $name_script <image>" >&2
+  echo "<image> is the image of 16 bits (change this image for 8 bits)" >&2
+  exit 1
+}
+#
+totalargs=1
+#
+if [ $# -ne $totalargs ] ; then
+  msg_error
+  exit 1
+fi
+#
+in_img=$1
+#
+if [ ! -f "$in_img" ] ; then
+  echo "The file '$in_img' not exist" >&2
+  exit 1
+fi
+#
+temp_dir=$(mktemp -d)
+basename_img=$(basename $in_img)
+#
+echo "Converting $basename_img to 8bits..."
+#
+calc_min_max_bands $in_img
+rm "$in_img.aux.xml"
+#
+# Single bands with 8bits
+for id in $( seq 0 $(echo "${#min_max_bands[@]} - 1" | bc) )
+do
+ numBand=$(echo "$id+1" | bc)
+ gdal_translate -q -ot Byte -b $numBand -scale ${min_max_bands[$id]} $in_img "$temp_dir/$basename_img.B$numBand.temp"
+done
+# VRT
+calc_str_vrt_bands
+gdalbuildvrt -q -separate "$temp_dir/$basename_img.vrt" $str_vrt_bands
+# Remove ORIGINAL AND Create image 8bits
+gdal_translate -q -co COMPRESS=LZW "$temp_dir/$basename_img.vrt" "$temp_dir/$basename_img"
+mv "$temp_dir/$basename_img" $in_img
+# Clean
+rm -r $temp_dir
