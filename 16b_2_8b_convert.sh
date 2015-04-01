@@ -38,26 +38,29 @@ calc_min_max(){
 # line_stats:
 # Minimum=5145.000,Maximum=21668.000,Mean=6399.841,StdDev=871.059
   local line_stats=$1
-  local min=$(echo $line_stats | cut -d',' -f1 | cut -d'=' -f2)
-  local max=$(echo $line_stats | cut -d',' -f2 | cut -d'=' -f2)
-  min_max=$(echo "${min%.*} ${max%.*}")
+  min=$(echo $line_stats | cut -d',' -f1 | cut -d'=' -f2)
+  max=$(echo $line_stats | cut -d',' -f2 | cut -d'=' -f2)
 }
 #
-calc_min_max_bands(){
+calc_arrays(){
+# calc_min_max: [ ]
   local img=$1
-  local numb=0
+  local index=0
   for item in $(gdalinfo -stats $img | grep Minimum | sed 's/\s\+//g')
   do
-    numb=$(echo "$numb+1" | bc)
     calc_min_max $item
-    min_max_bands[$numb]=$(echo $min_max)
+    aryMin[$index]=$min
+    aryMax[$index]=$max
+    aryIndex[$index]=$index
+    index=$(echo $index+1 | bc)
   done
 }
 #
 calc_str_vrt_bands(){
   str_vrt_bands=""
-  for numBand in $( seq 1 ${#min_max_bands[@]} )
+  for item in ${aryIndex[@]}
   do
+    numBand=$(echo $item+1 | bc)
     str_vrt_bands="$str_vrt_bands $temp_dir/$basename_img.B$numBand.temp"
   done
 }
@@ -88,14 +91,14 @@ basename_img=$(basename $in_img)
 #
 echo "Converting $basename_img to 8bits..."
 #
-calc_min_max_bands $in_img
+calc_arrays $in_img
 rm "$in_img.aux.xml"
 #
 # Single bands with 8bits
-for id in $( seq 0 $(echo "${#min_max_bands[@]} - 1" | bc) )
+for item in ${aryIndex[@]}
 do
- numBand=$(echo "$id+1" | bc)
- gdal_translate -q -ot Byte -b $numBand -scale ${min_max_bands[$id]} $in_img "$temp_dir/$basename_img.B$numBand.temp"
+ numBand=$(echo "$item+1" | bc)
+ gdal_translate -q -ot Byte -b $numBand -scale ${aryMin[$item]} ${aryMax[$item]} $in_img "$temp_dir/$basename_img.B$numBand.temp"
 done
 # VRT
 calc_str_vrt_bands
